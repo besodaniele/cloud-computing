@@ -1,0 +1,707 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{longtable,booktabs,tabularx}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{microtype}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!60!black}
+\definecolor{codebg}{RGB}{246,247,249}
+\definecolor{codeframe}{RGB}{205,210,218}
+\lstdefinestyle{terminal}{basicstyle=\ttfamily\small,backgroundcolor=\color{codebg},frame=single,rulecolor=\color{codeframe},breaklines=true,columns=fullflexible,showstringspaces=false,keepspaces=true,upquote=true}
+\lstdefinestyle{dockerfile}{style=terminal,language=bash}
+\lstset{style=terminal}
+\pagestyle{fancy}\fancyhf{}\lhead{Cloud Computing -- Docker}\rhead{Study notes}\cfoot{\thepage}
+\setlist[itemize]{nosep,leftmargin=*}\setlist[enumerate]{nosep,leftmargin=*}
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.7em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.7em}{}
+\newcommand{\cmd}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\term}[1]{\textbf{#1}}
+\title{Docker for Cloud Computing\\\large Comprehensive lecture notes with practical examples}
+\author{Prepared from the supplied university lecture slides}
+\date{25 October 2026}
+\begin{document}\maketitle
+
+\tableofcontents\newpage
+
+\section{Virtualization: VMs and containers}
+\subsection{Virtualization and virtual machines}
+Virtualization emulates hardware or software components so that a program, or even a complete operating system, behaves as if it had a particular physical machine. A \term{virtual machine (VM)} presents an emulated hardware platform on which a full guest operating system runs. A \term{hypervisor} (virtual machine monitor) creates and manages VMs, dividing physical CPU, memory, storage, and networking among them. Examples from the slides include VirtualBox, KVM, VMware, and Xen.
+
+VMs offer strong isolation, but the abstraction has overhead. Sensitive operations can trap to the hypervisor for validation or emulation; memory translation and device I/O also add work. Modern hardware reduces this cost, but each VM still carries a complete guest OS. In a multi-tier deployment, separate VMs might host a gateway, frontend, application services/workers, database, cache, and message broker. This gives useful isolation but can waste resources and makes scaling coarse-grained: scaling one small service may mean replicating an entire VM.
+
+\subsection{Containers}
+A \term{container} packages an application with its libraries, tools, and configuration in an isolated execution environment. Unlike a VM, a conventional Linux container does not boot a separate kernel: containers share the host kernel. They are therefore generally lighter and faster to start, making them a natural fit for microservices and denser deployments. A container is still a process (or process tree) in the host OS, subject to isolation and resource controls; it is not a complete machine.
+
+\begin{center}\begin{tabularx}{\linewidth}{>{\bfseries}p{.18\linewidth}XX}\toprule & Virtual machine & Container \\ \midrule
+Kernel & Guest OS and its own kernel & Shares host kernel (for Linux containers)\\
+Packaging & Virtual hardware plus complete OS disk & Application filesystem layers and configuration\\
+Startup/resource footprint & Usually heavier & Usually lighter\\
+Isolation boundary & Virtual hardware/hypervisor & OS-kernel mechanisms such as namespaces and cgroups\\
+Typical unit of scaling & VM & Application/container instance\\\bottomrule\end{tabularx}\end{center}
+
+\subsection{Linux primitives: namespaces and cgroups}
+\term{Namespaces} give processes different views of system resources. The slides list:
+\begin{itemize}
+\item PID namespace: process identifiers and process visibility.
+\item NET namespace: network interfaces, routes, and network stack.
+\item MNT namespace: mount points and filesystem view.
+\item UTS namespace: hostname and domain-name view.
+\item IPC namespace: inter-process communication objects such as semaphores.
+\item USER namespace: user and group IDs.
+\end{itemize}
+\term{Control groups (cgroups)} account for and constrain resource use, including memory, CPU, block I/O, and (depending on configuration) network-related accounting. Isolation and resource limits are distinct: a container may be isolated but still have no explicit CPU or memory cap.
+
+\section{Docker concepts and architecture}
+\subsection{Docker, images, containers, registries}
+Docker automates packaging and running applications in containers. Its goal is a uniform way to build, ship, and run applications across environments.
+\begin{itemize}
+\item \term{Image}: read-only template containing application code, libraries, dependencies, filesystem layers, and metadata. Images can be based on other images and can share layers.
+\item \term{Container}: a created/running instance of an image. A container adds a thin writable layer above the image layers; it is intended to be replaceable and often ephemeral.
+\item \term{Registry}: service for storing and distributing images. Registries can be public or private. Docker Hub is the default registry used by the standard CLI when no other registry is specified.
+\item \term{Runtime/engine}: software that creates and manages containers, networks, images, and volumes, and exposes an API and CLI.
+\end{itemize}
+
+\subsection{Layered filesystem and copy-on-write}
+Image filesystems are assembled from immutable, read-only layers. Layers can be shared across images, and many containers can be created from one image without copying its whole filesystem. When a container changes a file, the changed data is written to that container's writable layer (copy-on-write); unchanged files remain in lower layers. This reduces duplication and allows fast starts. Removing a container removes its writable layer, so changes stored only there disappear.
+
+\subsection{Docker Engine client/server architecture}
+The Docker Engine has three major pieces:
+\begin{itemize}
+\item \cmd{dockerd}: the long-running daemon that manages Docker objects.
+\item REST API: interface through which clients request operations. Communication may use a Unix socket or network connection.
+\item \cmd{docker}: command-line client, which calls the API.
+\end{itemize}
+The client and daemon may run on the same machine or on different machines. Beneath the daemon, \term{containerd} coordinates container lifecycle tasks such as image handling, filesystem preparation, and supervision. \term{runc}, an OCI-compatible low-level runtime, creates and starts the container process using kernel features such as namespaces and cgroups. The OCI (Open Container Initiative) defines standards that support interoperability among container tooling.
+
+\subsection{Basic command help}
+\begin{lstlisting}
+docker --version        # Show installed Docker CLI version
+docker -v              # Short version of the same command
+docker --help          # List top-level commands and options
+docker run --help      # Show options for a particular command
+\end{lstlisting}
+The optional word \cmd{container} or \cmd{image} makes a command's object explicit in many command families: for example, \cmd{docker container ls} and \cmd{docker ps} list containers; \cmd{docker image ls} and \cmd{docker images} list images. The slides use both long and short forms.
+
+\section{Working with images}
+\subsection{Searching, downloading, listing, inspecting}
+\begin{lstlisting}
+docker search ubuntu
+# Filter search results (supported filters depend on CLI/version):
+docker search --filter is-official=true ubuntu
+docker search --filter stars=100 ubuntu
+# Limit displayed search results:
+docker search --limit 5 ubuntu
+
+docker pull alpine:3.9.4
+# Select a platform explicitly when needed:
+docker pull --platform=linux/amd64 alpine:3.9.4
+
+docker image ls                 # List local images
+docker images                   # Legacy shorthand
+docker image ls -a              # Include intermediate/dangling images
+docker image ls -q              # Print image IDs only
+docker image ls --no-trunc      # Show full IDs
+
+docker image inspect alpine:3.9.4
+docker image inspect --platform=linux/amd64 alpine:3.9.4 \\
+  --format '{{json .RootFS.Layers}}'
+\end{lstlisting}
+\cmd{docker search} searches registry listings. Filters can select official images or minimum star counts, and \cmd{--limit} controls the number of results. \cmd{docker pull} downloads an image and any missing layers. If two images share a layer, Docker can reuse the local copy rather than download it again. A tag such as \cmd{alpine:3.9.4} identifies a version; if no tag is supplied, Docker generally uses \cmd{latest}, which is a mutable tag rather than a guarantee of newest or safest software. \cmd{inspect} returns structured metadata; \cmd{--format} extracts a specific field using a Go template.
+
+\subsection{Tagging, logging in, and publishing}
+Images are named with a repository and optional tag. A registry-qualified name can include a registry hostname and namespace, for example \cmd{registry.example.com/team/app:1.2}. Common publication flow:
+\begin{lstlisting}
+docker login                         # Authenticate to a registry
+docker tag local-app:1.0 USER/local-app:1.0
+docker push USER/local-app:1.0       # Upload image and required layers
+\end{lstlisting}
+The source slides focus on build and push workflows. Authenticate only to a registry you trust, and do not put passwords directly in shell history or Dockerfiles.
+
+\section{Running and managing containers}
+\subsection{The meaning of \cmd{docker run}}
+\cmd{docker run} combines several actions: if needed it pulls the image, creates a container, configures it, and starts its main process. The container's lifetime is tied to that process: when the main process exits, the container stops.
+\begin{lstlisting}
+docker run hello-world                 # Pull if needed, run, then exit
+docker run --name web -d nginx         # Named container, detached
+docker run --name web -p 8081:80 -d nginx:latest
+\end{lstlisting}
+In \cmd{-p 8081:80}, port 8081 on the host is forwarded to port 80 in the container. The application inside the container must listen on the container port. \cmd{-d} runs in the background. \cmd{--name} assigns a human-readable name. \cmd{-it} combines an interactive stdin connection with a pseudo-terminal; it is useful for shells. \cmd{--rm} automatically removes the container after it exits. These options can be combined, e.g. \cmd{docker run --rm -it alpine sh}.
+
+\subsection{Container listings and statistics}
+\begin{lstlisting}
+docker ps                         # Running containers
+docker ps -a                      # All containers, including stopped ones
+docker container ls                # Equivalent to docker ps
+docker container ls -a             # Include stopped containers
+docker ps -s                      # Show writable/root filesystem size
+docker ps -as                     # Show sizes for all containers
+docker stats                      # Live resource-use stream
+docker stats CONTAINER_ID          # One container
+docker top CONTAINER_NAME          # Processes running in a container
+\end{lstlisting}
+The \cmd{ps} output typically includes container ID, image, command, creation time, status, published ports, and name. \cmd{-s} adds filesystem-size information; the writable size is not the same as total image size. \cmd{stats} reports live CPU, memory, network I/O, and block I/O metrics. \cmd{top} displays processes in the container from the host's perspective.
+
+\subsection{Executing commands in a running container}
+\begin{lstlisting}
+docker exec CONTAINER_ID ls
+docker exec -d CONTAINER_ID some-command  # Detached command
+docker exec -it CONTAINER_ID bash        # Interactive shell, if bash exists
+docker exec -it CONTAINER_ID sh          # More widely available shell
+docker exec CONTAINER_ID env             # Print environment variables
+\end{lstlisting}
+\cmd{exec} starts an additional process inside an already-running container; it does not replace the main process. \cmd{-d} detaches, \cmd{-i} keeps stdin open, and \cmd{-t} allocates a terminal. Minimal images (for example Alpine) may not include Bash, so use \cmd{sh} or Alpine's \cmd{ash} when needed.
+
+\subsection{Container lifecycle commands}
+\begin{longtable}{p{.30\linewidth}p{.64\linewidth}}\toprule
+\textbf{Command} & \textbf{Meaning and example}\\\midrule
+\endhead
+\cmd{docker create IMAGE} & Create a container without starting it.\\
+\cmd{docker start NAME} & Start a stopped container.\\
+\cmd{docker stop NAME} & Ask the main process to stop gracefully (normally SIGTERM, then SIGKILL after a timeout).\\
+\cmd{docker restart NAME} & Stop and start the container again.\\
+\cmd{docker pause NAME} & Suspend processes in a running container; resources remain allocated.\\
+\cmd{docker unpause NAME} & Resume paused processes.\\
+\cmd{docker kill NAME} & Send a signal (SIGKILL by default); can specify another signal with \cmd{--signal}.\\
+\cmd{docker rm NAME} & Remove a stopped container.\\
+\cmd{docker rm -f NAME} & Force removal, stopping a running container if necessary.\\
+\cmd{docker container remove -f NAME} & Explicit object-family form of forced removal.\\
+\cmd{docker run --rm IMAGE} & Remove the container automatically after it exits.\\\bottomrule
+\end{longtable}
+Useful inspection sequence:
+\begin{lstlisting}
+docker ps
+docker ps -a
+docker stop web
+docker start web
+docker logs web
+docker rm web
+\end{lstlisting}
+Stopping is not deleting. A stopped container remains listed by \cmd{docker ps -a} until removed. Removing a container does not remove the image used to create it.
+
+\subsection{Container logs and inspection}
+\begin{lstlisting}
+docker logs CONTAINER
+docker logs --follow CONTAINER
+docker logs --tail 5 CONTAINER
+docker logs --timestamps --details CONTAINER
+docker inspect CONTAINER
+docker inspect -f '{{ .NetworkSettings.IPAddress }}' CONTAINER
+\end{lstlisting}
+\cmd{logs} displays the main process's captured standard output/error. \cmd{--follow} streams new output; \cmd{--tail} limits the number of lines; \cmd{--timestamps} adds timestamps; \cmd{--details} includes extra attributes when available. \cmd{inspect} returns detailed configuration and state, including mounts, networking, environment, and runtime settings. The IP-address template is useful on networks where a container IP is assigned, but applications should usually use service/container names on a user-defined network rather than hard-code dynamic IP addresses.
+
+\section{Resource constraints and system administration}
+\subsection{Docker system commands}
+\begin{lstlisting}
+docker system --help
+docker system df
+docker system df -v
+docker system events
+docker system prune
+docker system prune -a
+\end{lstlisting}
+\cmd{docker system df} summarizes disk use by images, containers, local volumes, and build cache; \cmd{-v} adds detail. \cmd{docker system events} streams daemon events such as container start/stop/kill. \cmd{docker system prune} removes unused objects to reclaim disk space. Adding \cmd{-a} broadens image cleanup to unused images, not just dangling ones. Review the prompt and understand which data is disposable before pruning; volumes can contain persistent data.
+
+\subsection{Memory and CPU limits}
+By default, a container has no explicit CPU or memory limit and may use resources allowed by the host kernel. Docker supports hard limits and soft reservations. A hard memory cap restricts the maximum; a memory reservation is a softer threshold that matters under host contention.
+\begin{lstlisting}
+# Hard memory limit of 256 MiB
+docker run --memory=256m IMAGE
+# Soft memory reservation
+docker run --memory-reservation=256m IMAGE
+# At most half a CPU and 100 MiB RAM
+docker run --name halfcpu -d --cpus=0.5 --memory=100m alpine \\
+  dd if=/dev/zero of=/dev/null
+# Pin to selected logical CPUs
+docker run --cpuset-cpus="0-1" IMAGE
+# Relative CPU weight when CPU is contended
+docker run --cpu-shares=512 IMAGE
+\end{lstlisting}
+\cmd{--cpus} specifies a quota as a fraction of CPU capacity (for example, 1.5 means at most one and a half CPUs' worth). The lower-level \cmd{--cpu-period} and \cmd{--cpu-quota} configure the CFS scheduling period and quota; the slides recommend \cmd{--cpus} for the common case. \cmd{--cpuset-cpus} restricts the CPUs/cores a container may run on (e.g. \cmd{0-3} or \cmd{1,3}). \cmd{--cpu-shares} is a relative weight, typically 1024 by default, and matters when CPU time is contested; it is not a hard cap. \cmd{docker stats} can be used to observe the result.
+
+\section{Persistent data: volumes and mounts}
+\subsection{Why container writable layers are not enough}
+Data stored only in a container's writable layer is lost when that container is removed. It is also harder to share with other processes, tied to the container's storage driver, and can be slower than direct host filesystem writes. Persistent application state should generally live in a mount.
+
+\subsection{Three mount types}
+\begin{longtable}{p{.18\linewidth}p{.38\linewidth}p{.36\linewidth}}\toprule
+\textbf{Type} & \textbf{Where data lives} & \textbf{Typical use / caveat}\\\midrule
+\endhead
+Volume & Docker-managed host storage (on Linux commonly under \cmd{/var/lib/docker/volumes/}). & Preferred general-purpose persistent storage; Docker manages lifecycle; may be named or anonymous and may use volume drivers.\\
+Bind mount & An explicit file or directory path on the host. & Share source code/configuration or host files. Depends on host path layout and lets the container potentially modify host files.\\
+tmpfs & Host memory; not written to persistent disk. & Temporary state or sensitive transient data; disappears when the container stops/is removed.\\\bottomrule
+\end{longtable}
+A volume can be mounted into multiple containers. Volume drivers (plugins) extend storage beyond the local host, for example to remote storage or cloud providers; the slides name Azure File Storage, Flocker, GlusterFS, OpenStorage, GCE-Docker, Ceph RBD, and FUSE-derived drivers. Docker can create a volume automatically if a requested named/anonymous volume does not exist. When an empty volume is mounted over a populated image directory, Docker normally copies the existing directory contents into the volume unless copy-up is disabled. Mounting a non-empty volume or bind mount over a directory hides the underlying image files for as long as the mount is present; it does not delete them.
+
+\subsection{Mount syntax}
+\begin{lstlisting}
+# Named volume: Docker manages the volume
+ docker volume create app-data
+ docker run -d --name db --mount type=volume,source=app-data,target=/var/lib/mysql mysql
+# Equivalent compact syntax for many common cases:
+ docker run -d -v app-data:/var/lib/mysql mysql
+# Bind mount the current host directory into /app
+ docker run --rm -it --mount type=bind,source="$(pwd)",target=/app alpine sh
+# Compact bind mount syntax
+ docker run --rm -it -v "$(pwd)":/app alpine sh
+# Read-only bind mount
+ docker run --mount type=bind,source="$(pwd)/config",target=/app/config,readonly IMAGE
+# tmpfs mount
+ docker run --mount type=tmpfs,target=/run/cache IMAGE
+\end{lstlisting}
+For \cmd{--mount}, comma-separated key/value fields specify \cmd{type}, \cmd{source}/\cmd{src}, \cmd{destination}/\cmd{dst}/\cmd{target}, and optionally \cmd{readonly}. The mount type may be omitted for a Docker-managed volume in supported forms. \cmd{-v} is shorter but \cmd{--mount} makes the mount type and fields explicit.
+
+\subsection{Volume management commands}
+\begin{lstlisting}
+docker volume create app-data
+docker volume ls
+docker inspect app-data
+docker volume rm app-data
+docker volume prune
+\end{lstlisting}
+A volume cannot normally be removed while in use by a container. \cmd{docker volume prune} removes unused volumes, so ensure that no needed data is stored in an unattached volume.
+
+\subsection{Practical storage examples}
+Persist a database directory independently of a container:
+\begin{lstlisting}
+docker volume create mysql-data
+docker run -d --name mysql-db \\
+  -e MYSQL_ROOT_PASSWORD='change-me' \\
+  -v mysql-data:/var/lib/mysql mysql:8
+docker inspect mysql-db
+docker rm -f mysql-db
+# Re-create using the same mysql-data volume to reuse the database files.
+\end{lstlisting}
+Share a local project directory with a tool container:
+\begin{lstlisting}
+docker run --rm -it -v "$(pwd)/project":/app -w /app \\
+  maven:3.5-jdk-8 mvn clean install -Dmaven.test.skip=true
+\end{lstlisting}
+Here \cmd{-w /app} sets the working directory. The container is removed after the command finishes, while files written through the bind mount remain on the host. For a Python script requiring NumPy, the same pattern is \cmd{docker run --rm -it -v "$(pwd)/es-python":/app -w /app adreeve/python-numpy python es-python.py}.
+
+\section{Building images and Dockerfiles}
+\subsection{Build context and image creation}
+\cmd{docker build} reads a Dockerfile and a \term{build context}, a set of files at a local path or URL that the builder can access. The instructions are processed in order to create an image with filesystem layers and metadata such as default process, exposed ports, environment variables, user, and volume mount points.
+\begin{lstlisting}
+docker build -t myapp:1.0 .
+docker build -t myapp:1.0 -f path/to/Dockerfile .
+docker build --pull --no-cache -t myapp:dev .
+docker build --quiet -t myapp:1.0 .
+docker build --target build -t myapp-build .
+\end{lstlisting}
+The final \cmd{.} is the context directory. \cmd{-t/--tag} assigns a name and tag; \cmd{-f/--file} selects a Dockerfile; \cmd{--pull} attempts to refresh the base image; \cmd{--no-cache} (additional common option) disables reuse of cached build steps; \cmd{--quiet} prints less build output; \cmd{--rm} removes intermediate containers after a successful build; \cmd{--force-rm} removes them even if the build fails; \cmd{--build-arg NAME=value} supplies a build argument; \cmd{--target} selects a named stage in a multi-stage build. Multiple tags can point to the same image ID.
+
+Build-time resource flags in the lecture include \cmd{--cpu-period}, \cmd{--cpu-quota}, \cmd{--cpu-shares}/\cmd{-c}, \cmd{--cpuset-cpus}, \cmd{--memory}/\cmd{-m}, and \cmd{--memory-swap}. They constrain build instruction execution, not the resources of the final container. BuildKit/buildx behavior can vary with Docker version; consult the installed CLI help for exact current options.
+
+\subsection{The \cmd{.dockerignore} file}
+A \cmd{.dockerignore} file is not a Dockerfile instruction. It is a newline-separated list of patterns that excludes matching files from the build context, reducing transfer time and preventing unnecessary files or secrets from being sent to the builder. Example:
+\begin{lstlisting}
+# Ignore temporary directories and Markdown files
+*/temp*
+*/*/temp*
+temp?
+*.md
+!README*.md
+README-secret.md
+\end{lstlisting}
+Patterns are applied according to Docker's ignore rules; negation patterns beginning with \cmd{!} can re-include selected paths. Keep credentials and local build artifacts out of the context.
+
+\subsection{Dockerfile instructions}
+Each instruction generally has the form \cmd{INSTRUCTION arguments}; lines beginning with \cmd{#} are comments. Docker processes instructions in sequence. Some affect build-time layers, others configure container runtime behavior.
+\begin{longtable}{p{.20\linewidth}p{.72\linewidth}}\toprule
+\textbf{Instruction} & \textbf{Purpose}\\\midrule\endhead
+\cmd{FROM} & Select base image and begin a build stage. \cmd{FROM scratch} starts from an explicitly empty base.\\
+\cmd{LABEL} & Add key/value metadata; labels from a base may be inherited and a later value can override an earlier one.\\
+\cmd{COPY} & Copy files/directories from the build context (or a named stage) into the image.\\
+\cmd{ADD} & Copy files and has additional behavior such as supported remote URL/local archive handling. Prefer \cmd{COPY} unless the extra behavior is needed.\\
+\cmd{RUN} & Execute a build-time command in a temporary build container; its filesystem changes form a layer.\\
+\cmd{ONBUILD} & Register an instruction to run when a downstream image uses this image as its base.\\
+\cmd{ARG} & Define a build-time variable, optionally with a default; pass values using \cmd{--build-arg}. Not automatically persisted as a runtime environment variable.\\
+\cmd{ENV} & Set environment variables available to later build instructions and containers created from the image.\\
+\cmd{WORKDIR} & Set the working directory for following \cmd{RUN}, \cmd{CMD}, \cmd{ENTRYPOINT}, \cmd{COPY}, and \cmd{ADD}; creates it if needed. Prefer absolute paths.\\
+\cmd{VOLUME} & Declare a mount point intended for external storage. Docker may initialize an anonymous volume from image contents.\\
+\cmd{USER} & Set the user and optionally group used by subsequent runtime commands and relevant later build instructions.\\
+\cmd{EXPOSE} & Document a port the application listens on; does not publish it to the host.\\
+\cmd{ENTRYPOINT} & Define the main executable/process for the container. Exec form is generally preferred.\\
+\cmd{CMD} & Provide default command or default arguments to \cmd{ENTRYPOINT}; only the last \cmd{CMD} in a Dockerfile takes effect.\\
+\cmd{HEALTHCHECK} & Define a command Docker uses to assess container health (supported by Dockerfile syntax).\\
+\cmd{STOPSIGNAL} & Set the signal sent when stopping the container.\\
+\cmd{SHELL} & Change the shell used for shell-form instructions on supported platforms.\\\bottomrule\end{longtable}
+\cmd{MAINTAINER} appears in older material but is deprecated in favor of \cmd{LABEL} metadata.
+
+\subsection{FROM, LABEL, COPY, ADD, RUN}
+\begin{lstlisting}
+FROM ubuntu:24.04
+LABEL org.opencontainers.image.authors="Cloud Computing laboratory"
+WORKDIR /opt/app
+COPY requirements.txt .
+RUN apt-get update \\
+ && apt-get install -y --no-install-recommends curl ca-certificates \\
+ && rm -rf /var/lib/apt/lists/*
+COPY . .
+\end{lstlisting}
+\cmd{FROM} establishes the base filesystem. \cmd{COPY source destination} copies from the context into the image. \cmd{ADD} can download a URL or unpack a local tar archive, so its extra semantics should be deliberate. \cmd{RUN} executes at build time; chaining related package-manager operations with \cmd{&&} can reduce unnecessary layers and allows cleanup in the same layer. Build context paths and destination paths must be considered carefully.
+
+\subsection{ARG, ENV, and variable replacement}
+\begin{lstlisting}
+ARG APP_VERSION=1.0
+FROM alpine:3.20
+ARG APP_VERSION
+ENV APP_HOME=/opt/app APP_VERSION=${APP_VERSION}
+WORKDIR ${APP_HOME}
+\end{lstlisting}
+An \cmd{ARG} is supplied during build, for example \cmd{docker build --build-arg APP_VERSION=2.0 -t app:2.0 .}. An \cmd{ENV} variable persists in image configuration and is available when a container runs. Do not use either as a safe place for secrets: build arguments and image environment metadata may be exposed. Dockerfile variable forms include \cmd{$NAME} and \cmd{${NAME}}. The forms \cmd{${NAME:-word}} and \cmd{${NAME:+word}} provide shell-like default/conditional substitution in supported Dockerfile variable-replacement contexts: the first uses \cmd{word} if the variable is unset/empty according to the relevant semantics; the second expands to \cmd{word} when set and otherwise to an empty string.
+
+\subsection{WORKDIR, USER, VOLUME, EXPOSE}
+\begin{lstlisting}
+WORKDIR /srv/app
+COPY app.jar .
+USER 10001:10001
+VOLUME ["/data"]
+EXPOSE 8080
+\end{lstlisting}
+Use \cmd{WORKDIR} rather than relying on a shell command such as \cmd{RUN cd ...}; each instruction runs in its own build step. \cmd{USER} improves security by avoiding root where possible. \cmd{VOLUME} marks a path for external data storage. \cmd{EXPOSE 8080} documents the container port, but access from the host still requires publishing, for example \cmd{docker run -p 8080:8080 IMAGE}; \cmd{-P} publishes all exposed ports to randomly selected host ports.
+
+\subsection{ENTRYPOINT and CMD}
+\cmd{ENTRYPOINT} defines the executable that runs when a container starts. \cmd{CMD} supplies default arguments to that executable, or a default command when no entrypoint is set. Prefer JSON/exec form because it launches the executable directly and handles signals more predictably:
+\begin{lstlisting}
+ENTRYPOINT ["java", "-jar", "app.jar"]
+CMD ["--server.port=8080"]
+\end{lstlisting}
+The shell form runs through a shell (such as \cmd{/bin/sh -c}), which can interfere with signal delivery and graceful shutdown. Only the last \cmd{CMD} is effective. Runtime arguments normally replace \cmd{CMD}'s defaults and are passed to an exec-form entrypoint. Override an entrypoint with \cmd{docker run --entrypoint=/bin/sh IMAGE}; use carefully because this replaces the intended application process.
+
+\subsection{ONBUILD and multi-stage builds}
+\cmd{ONBUILD} defers an instruction until another Dockerfile builds \cmd{FROM} the current image. It is useful for reusable base images that automate steps for downstream projects.
+
+A multi-stage build uses multiple \cmd{FROM} instructions. Each starts a new stage; selected artifacts are copied into the final stage, leaving compilers, build caches, and development dependencies behind.
+\begin{lstlisting}
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /src
+COPY pom.xml .
+COPY src ./src
+RUN mvn -B package -DskipTests
+
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY --from=build /src/target/app.jar ./app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+\end{lstlisting}
+\cmd{docker build --target build -t app-build .} builds only the named intermediate stage. Multi-stage builds make runtime images smaller and reduce the software included in the final artifact.
+
+\subsection{A complete illustrative Dockerfile}
+\begin{lstlisting}
+FROM nginx:1.18.0
+LABEL org.opencontainers.image.title="Static web demo"
+COPY html/ /usr/share/nginx/html/
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+\end{lstlisting}
+Build and run it:
+\begin{lstlisting}
+docker build -t my-nginx:1.0 .
+docker run --name my-site -d -p 8080:80 --memory=500m my-nginx:1.0
+curl http://localhost:8080
+docker logs my-site
+docker rm -f my-site
+\end{lstlisting}
+The example keeps NGINX in the foreground so it remains the container's main process. The course also demonstrates a MongoDB-oriented image with package installation in \cmd{RUN}, a non-root \cmd{USER mongodb}, \cmd{VOLUME ["/data/db"]}, \cmd{EXPOSE 27017}, \cmd{ENTRYPOINT ["/usr/bin/mongod"]}, and \cmd{CMD ["--port", "27017", "--dbpath", "/data/db", "--bind_ip_all"]}. That example illustrates how build steps, data paths, ports, user, and runtime defaults fit together.
+
+\subsection{Build from a URL and build promotion}
+Docker can use a Git repository URL as a build context. The repository is fetched into a temporary local directory and sent to the builder. Example from the slides:
+\begin{lstlisting}
+docker build -t USER/nginx-example github.com/atbaker/nginx-example
+\end{lstlisting}
+After building and testing, tag and push an image to a registry to promote it between environments. Reusing the same immutable image artifact across test/staging/production improves consistency; configuration should be injected at runtime rather than baked in when it varies by environment.
+
+\section{Docker networking}
+\subsection{Container Network Model}
+Docker's Container Network Model (CNM) expresses networking through four components:
+\begin{itemize}
+\item \term{Sandbox}: a container's network stack configuration, including interfaces, IP addresses, routes, and DNS settings. It is commonly implemented with a Linux network namespace.
+\item \term{Endpoint}: connects one sandbox to one network. A Linux virtual Ethernet (veth) pair is a common implementation; one end resides in the container namespace and the other attaches to the network.
+\item \term{Network}: a group of endpoints that can communicate, implemented for example by a Linux bridge or overlay.
+\item \term{Cluster}: Docker hosts connected by one or more networks.
+\end{itemize}
+A Linux network namespace has its own interfaces, routes, and firewall rules. A container may join multiple networks. \term{libnetwork} implements CNM, supplies pluggable network drivers and IP address management (IPAM), and supports service discovery and load-balancing features. CNM is distinct from the Container Network Interface (CNI) used by systems such as Kubernetes.
+
+\subsection{Network commands}
+\begin{lstlisting}
+docker network ls
+docker network create -d bridge my-net
+docker network create --driver bridge --subnet 172.25.0.0/16 my-net
+docker network inspect my-net
+docker network connect my-net CONTAINER
+docker network disconnect my-net CONTAINER
+docker network rm my-net
+\end{lstlisting}
+\cmd{create} creates a network; \cmd{-d bridge} selects the bridge driver; \cmd{--subnet} specifies an IP address range. \cmd{inspect} shows configuration and connected endpoints. \cmd{connect} and \cmd{disconnect} attach/detach a container to/from an existing network. A network generally cannot be removed while containers remain connected.
+
+\subsection{Default bridge and user-defined bridge}
+On Linux, Docker's default bridge uses a virtual bridge commonly named \cmd{docker0}; each attached container typically has a veth pair and an interface such as \cmd{eth0}. IP forwarding and firewall/NAT rules provide external connectivity. The default bridge is convenient for simple experiments, but name-based service discovery is limited compared with user-defined networks. Docker recommends user-defined bridge networks for applications because containers can resolve one another by name or network alias and can be attached/detached dynamically.
+\begin{lstlisting}
+docker network create --driver bridge --subnet 172.25.0.0/16 my-net
+docker run -itd --name=container1 busybox
+docker run -itd --name=container2 busybox
+docker network connect my-net container2
+docker run --network=my-net --ip=172.25.3.3 -itd --name=container3 busybox
+docker exec -it container2 sh
+# Inside the container:
+ping container3
+\end{lstlisting}
+The example uses a static IP inside the declared subnet. Static assignments must be unique and belong to the network's subnet. Prefer DNS names/aliases for most applications because container IP addresses can change.
+
+\subsection{Aliases, discovery, and legacy links}
+User-defined networks provide embedded DNS. A container can connect to a service by its container name or configured network alias. Multiple containers can share an alias; this can support simple distribution across matching endpoints, though a production load-balancing design needs deliberate health and routing behavior.
+\begin{lstlisting}
+docker network create my-net
+docker run -itd --network=my-net --name c1 --network-alias foo busybox
+docker run -itd --network=my-net --name c2 --network-alias bar busybox
+docker run -itd --network=my-net --name c3 --network-alias foo busybox
+docker exec c2 ping foo
+\end{lstlisting}
+The older \cmd{--link=CONTAINER:ALIAS} option added name resolution, aliasing, and environment-variable injection on the default bridge. It is a legacy feature; user-defined networks are preferred.
+
+\subsection{Built-in network drivers}
+\begin{longtable}{p{.18\linewidth}p{.73\linewidth}}\toprule
+\textbf{Driver/mode} & \textbf{Behavior and trade-offs}\\\midrule\endhead
+\cmd{none} & No external networking; loopback remains. Useful where networking is deliberately disabled.\\
+\cmd{bridge} & Default single-host network based on a Linux bridge/virtual switch. Good for development and same-host container communication.\\
+\cmd{host} & Container shares the host network namespace and IP stack. Port isolation is removed; processes must coordinate host ports, and exposure/security require care.\\
+\cmd{overlay} & Connects containers across multiple Docker hosts using an overlay network (for example VXLAN encapsulation). Requires an appropriate multi-host setup.\\
+\cmd{macvlan} & Gives a container its own MAC address so it appears like a physical device on the LAN; useful for some legacy applications but depends on network infrastructure.\\\bottomrule\end{longtable}
+Examples:
+\begin{lstlisting}
+docker run --network=none -it --name isolated busybox sh
+docker run --network=host IMAGE
+docker network create --driver bridge my-net
+\end{lstlisting}
+Host networking is not equivalent to normal port publishing: the container uses the host's ports directly, so two processes cannot bind the same address/port combination. Overlay networks support cross-host communication; the driver handles routing to the correct Docker host and destination container.
+
+\subsection{Port publishing}
+\begin{lstlisting}
+docker run -d --name nginx -p 8081:80 nginx
+docker run -d --name nginx-random -P nginx
+\end{lstlisting}
+\cmd{-p HOST_PORT:CONTAINER_PORT} explicitly publishes a port. \cmd{-P} publishes all ports declared with \cmd{EXPOSE} to randomly selected host ports. \cmd{EXPOSE} alone does not make a port reachable from the host. Binding to \cmd{127.0.0.1:8080:8080} limits access to the host loopback interface, which is often safer for local development than publishing on every host interface.
+
+\section{Docker Compose and multi-service applications}
+\subsection{Services versus containers}
+A distributed application is made of services, such as a frontend/API and a database. A Compose service is a declarative definition of how to run a component; it may have one or more container replicas. Scaling a service horizontally changes the number of instances. Compose makes multi-container development environments repeatable, isolated, and quick to start, and can be used in CI/CD workflows alongside tools such as Maven, JUnit, or Jenkins.
+
+\subsection{Compose file structure}
+Compose configuration is YAML, commonly named \cmd{compose.yaml} or \cmd{docker-compose.yml}. Environment configuration can be supplied through an environment file (for example with a service-level \cmd{env_file:}) or variable interpolation from a project \cmd{.env} file. The course compares development and production files such as \cmd{.env.dev} and \cmd{.env}; remember that Compose interpolation and variables passed into the container are related but distinct mechanisms, and verify precedence for the Compose version in use. The slides use the older Compose file format with a \cmd{version} key; current Compose implementations generally use the Compose Specification and may treat that key as obsolete. The key concepts remain \cmd{services}, \cmd{networks}, and \cmd{volumes}.
+\begin{lstlisting}
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: demochatweb:0.1
+    ports:
+      - "8080:9000"
+    networks:
+      - my-net
+  mongo:
+    image: mongo:latest
+    volumes:
+      - data:/data/db
+    networks:
+      - my-net
+networks:
+  my-net:
+    driver: bridge
+volumes:
+  data:
+    driver: local
+\end{lstlisting}
+\cmd{services} defines application components and their image/build settings, ports, environment, dependencies, mounts, and networks. \cmd{build.context} identifies the build context and \cmd{build.dockerfile} chooses the Dockerfile. \cmd{image} names the resulting or pulled image. \cmd{ports} publishes host-to-container ports. \cmd{volumes} mounts persistent data. \cmd{networks} connects services to named networks. Top-level \cmd{volumes} and \cmd{networks} declare resources shared by services. Compose creates a project network by default even when a custom network is not explicitly declared.
+
+\subsection{Core Compose commands}
+\begin{longtable}{p{.33\linewidth}p{.61\linewidth}}\toprule
+\textbf{Command} & \textbf{Purpose}\\\midrule\endhead
+\cmd{docker compose up} & Create/start the application's services; \cmd{-d} detaches.\\
+\cmd{docker compose down} & Stop and remove project containers and networks; named volumes are normally retained unless volume removal is requested.\\
+\cmd{docker compose build} & Build or rebuild service images.\\
+\cmd{docker compose pull} & Pull service images.\\
+\cmd{docker compose config} & Validate and render the resolved configuration.\\
+\cmd{docker compose create} & Create service containers without starting them.\\
+\cmd{docker compose start} / \cmd{stop} & Start/stop existing service containers.\\
+\cmd{docker compose restart} & Restart services.\\
+\cmd{docker compose ps} & List project containers and their state.\\
+\cmd{docker compose logs} & Display logs; \cmd{-f} follows output.\\
+\cmd{docker compose exec SERVICE CMD} & Execute a command in a running service container.\\
+\cmd{docker compose run SERVICE CMD} & Start a one-off container for a service command.\\
+\cmd{docker compose top} & Show processes for service containers.\\
+\cmd{docker compose images} & List images used by the project.\\
+\cmd{docker compose port SERVICE PORT} & Show the published host port for a service port.\\
+\cmd{docker compose pause} / \cmd{unpause} & Pause/resume service containers.\\
+\cmd{docker compose kill} & Send a kill signal to service containers.\\
+\cmd{docker compose rm} & Remove stopped service containers.\\
+\cmd{docker compose events} & Stream container events.\\
+\cmd{docker compose push} & Push service images to their registries.\\
+\cmd{docker compose scale SERVICE=N} & Set a service's replica count (legacy form; \cmd{up --scale} is common).\\
+\cmd{docker compose version} & Display Compose version information.\\\bottomrule\end{longtable}
+Use \cmd{-f path/to/compose.yaml} to select a different file. If the default file exists in the current directory, it need not be specified.
+
+\subsection{A database and REST API example}
+The lecture illustrates a REST service backed by MariaDB. The database should be on a private user-defined network; only the API needs a published host port. Use persistent storage for the database and environment variables for configuration.
+\begin{lstlisting}
+services:
+  db:
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: db_micro
+      MARIADB_USER: micro
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  api:
+    image: miciav/micro:0.3.0
+    environment:
+      MYSQL_ADDRESS: db
+      MYSQL_PORT: "3306"
+      DB_USERNAME: micro
+      DB_PASSWORD: ${MARIADB_PASSWORD}
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [backend]
+    depends_on:
+      db:
+        condition: service_healthy
+networks:
+  backend:
+    driver: bridge
+volumes:
+  mariadb-data:
+\end{lstlisting}
+This is an illustrative, adapted configuration; image-specific health-check commands and environment-variable names must be verified for the selected image. A plain \cmd{depends_on} can establish startup order but does not by itself guarantee that a database is ready to accept connections; a health check and readiness condition address that distinction. Store sensitive values in an appropriate secret manager or local environment file excluded from version control, rather than committing passwords.
+
+\subsection{Compose lifecycle and scaling}
+\begin{lstlisting}
+docker compose up -d
+docker compose ps
+docker compose logs -f
+docker compose exec api sh
+docker compose up -d --scale api=2
+docker compose down
+\end{lstlisting}
+A service with a fixed host-port binding generally cannot be scaled to multiple replicas using that same host port, because replicas would compete for it. Scaling is most useful for services behind a reverse proxy/load balancer or services that do not bind the same fixed host port. The slides demonstrate an NGINX proxy routing by HTTP Host header to replicas, and use \cmd{curl -H "Host: whoami.local" localhost} to test host-based routing.
+
+\section{Databases, application containers, and operational patterns}
+\subsection{Environment variables and a MySQL-compatible database}
+Container environment variables are supplied at runtime with \cmd{-e KEY=value} or \cmd{--env-file FILE}; inside a running container they can be inspected with \cmd{docker exec CONTAINER env}. The slides show MySQL-compatible configuration variables such as \cmd{MYSQL_ROOT_PASSWORD}, \cmd{MYSQL_ROOT_HOST}, \cmd{MARIADB_ROOT_PASSWORD}, \cmd{MARIADB_DATABASE}, \cmd{MARIADB_USER}, and \cmd{MARIADB_PASSWORD}. The exact variables depend on the image.
+
+An example launch pattern (replace credentials and check the chosen image documentation):
+\begin{lstlisting}
+docker run -d --name mysql-server -p 3306:3306 \\
+  -e MYSQL_ROOT_PASSWORD='change-me' \\
+  -e MYSQL_ROOT_HOST='%' mysql/mysql-server:8.0.20
+\end{lstlisting}
+Then open a shell and database client, if installed:
+\begin{lstlisting}
+docker exec -it mysql-server bash
+mysql -uroot -p
+\end{lstlisting}
+The course SQL examples create a database and grant access:
+\begin{lstlisting}
+CREATE DATABASE cloud;
+CREATE USER 'user'@'%' IDENTIFIED BY 'replace-this-password';
+GRANT ALL PRIVILEGES ON cloud.* TO 'user'@'%' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+USE cloud;
+CREATE TABLE students (
+  first_name VARCHAR(30) NOT NULL,
+  last_name VARCHAR(60) NOT NULL,
+  email VARCHAR(256) NULL,
+  address VARCHAR(256) NOT NULL,
+  student_id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY
+);
+INSERT INTO students (first_name, last_name, address) VALUES ('Ada', 'Lovelace', 'London');
+SELECT * FROM students;
+\end{lstlisting}
+SQL data held only in the container's writable layer disappears when the container is removed. Mount a named volume at the database's data directory to preserve it. Avoid exposing database ports publicly unless required; on a private Docker network, application containers can reach the database by service name without publishing its port on the host.
+
+\subsection{Using containers as development tools}
+A container can be a disposable compiler/runtime environment. For Maven compilation with a host project mounted into \cmd{/workspace}:
+\begin{lstlisting}
+docker run --rm -v "$(pwd)/es-micro":/workspace -w /workspace \\
+  maven:3.5-jdk-8 mvn clean install -Dmaven.test.skip=true
+\end{lstlisting}
+Run a generated JAR similarly, publishing its service port:
+\begin{lstlisting}
+docker run --rm -v "$(pwd)/es-micro/target":/app -w /app \\
+  -p 8080:8080 maven:3.5-jdk-8 \\
+  java -jar ./micro-0.0.1-SNAPSHOT.jar
+\end{lstlisting}
+For a remote lab VM, SSH local port forwarding can make a remote service reachable at local port 8080:
+\begin{lstlisting}
+ssh -L 8080:localhost:8080 -p VM_PORT student@VM_IP
+curl localhost:8080/measure/temperature
+curl localhost:8080/measure/temperature | python -m json.tool
+\end{lstlisting}
+The shell command \cmd{$(pwd)} expands to the absolute path of the current working directory in common POSIX shells. Ensure bind-mount paths are correct for the operating system and shell in use.
+
+\section{Command reference: consolidated list}
+This section groups the commands appearing throughout the lecture material. Placeholder values such as \cmd{CONTAINER}, \cmd{IMAGE}, \cmd{VOL_NAME}, and \cmd{NET_NAME} must be replaced with real names or IDs.
+\begin{longtable}{p{.42\linewidth}p{.50\linewidth}}\toprule
+\textbf{Command} & \textbf{Use}\\\midrule\endhead
+\cmd{docker --version}, \cmd{docker --help} & Version and general help.\\
+\cmd{docker search IMAGE} & Search registry listings; supports filters and limit.\\
+\cmd{docker pull IMAGE[:TAG]} & Download image/layers.\\
+\cmd{docker image ls} / \cmd{docker images} & List local images; options \cmd{-a}, \cmd{-q}, \cmd{--no-trunc}.\\
+\cmd{docker image inspect IMAGE} & Inspect image metadata and layers.\\
+\cmd{docker rmi IMAGE} / \cmd{docker image rm IMAGE} & Remove a local image (not a running container).\\
+\cmd{docker tag SOURCE TARGET} & Add a repository/tag reference to an image.\\
+\cmd{docker login}, \cmd{docker push IMAGE} & Authenticate and publish.\\
+\cmd{docker build -t NAME:TAG PATH} & Build an image from a Dockerfile/context.\\
+\cmd{docker run OPTIONS IMAGE COMMAND} & Create and start a container.\\
+\cmd{docker create IMAGE} & Create without starting.\\
+\cmd{docker ps [-a] [-s]} & List running/all containers and optionally sizes.\\
+\cmd{docker start/stop/restart NAME} & Start, stop, or restart.\\
+\cmd{docker pause/unpause NAME} & Suspend/resume container processes.\\
+\cmd{docker kill NAME} & Send a signal (SIGKILL by default).\\
+\cmd{docker rm [-f] NAME} & Remove container, optionally force.\\
+\cmd{docker exec [-it] NAME CMD} & Run command in running container.\\
+\cmd{docker top NAME} / \cmd{docker stats NAME} & Process list / live resource metrics.\\
+\cmd{docker inspect NAME} / \cmd{docker logs NAME} & Detailed configuration/state / main-process logs.\\
+\cmd{docker system df [-v]} & Disk usage summary/detail.\\
+\cmd{docker system events} & Stream daemon events.\\
+\cmd{docker system prune [-a]} & Remove unused objects to reclaim space.\\
+\cmd{docker volume create/ls/rm/prune} & Manage Docker volumes.\\
+\cmd{docker network create/ls/inspect/rm} & Manage networks.\\
+\cmd{docker network connect/disconnect NET CONTAINER} & Attach/detach a container.\\
+\cmd{docker compose up/down} & Start stack / stop and remove project containers and networks.\\
+\cmd{docker compose build/pull/push} & Build, download, or publish service images.\\
+\cmd{docker compose ps/logs/exec/run} & Inspect services, view logs, execute or run commands.\\
+\cmd{docker compose config} & Validate and render resolved YAML.\\\bottomrule\end{longtable}
+
+\section{Practical cautions and study checklist}
+\begin{itemize}
+\item Distinguish image from container: an image is the template; a container is an instance with its own writable layer and runtime state.
+\item Distinguish stopping from removing. \cmd{stop} preserves the container; \cmd{rm} deletes it. \cmd{--rm} removes it after exit.
+\item Persist state in a volume or bind mount, not only in the container layer.
+\item Remember that \cmd{EXPOSE} documents a port; \cmd{-p} publishes it to the host.
+\item Use user-defined bridge networks for name-based communication between containers on one host.
+\item Apply resource limits explicitly where workloads require them; \cmd{--cpu-shares} is a relative weight, while \cmd{--cpus} and \cmd{--memory} are limits.
+\item Prefer exec-form \cmd{ENTRYPOINT} and \cmd{CMD} for predictable signal handling.
+\item Keep build contexts small with \cmd{.dockerignore}; avoid embedding credentials in image layers or metadata.
+\item Use multi-stage builds to keep compilers and build dependencies out of runtime images.
+\item Treat \cmd{prune}, volume deletion, and forced container removal as potentially destructive operations.
+\item In Compose, startup order is not the same as application readiness. Use health checks and robust retry logic for dependencies.
+\end{itemize}
+
+\end{document}
