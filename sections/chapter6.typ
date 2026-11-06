@@ -170,3 +170,125 @@ To obtain current prices:
 	- On-Demand vs Savings Plans / RIs
 	- Spot only if interruption is acceptable
 	- Estimate monthly and annual costs
+== Autoscaling
+In traditional monolithic deployments, the application’s database, API, and business logic coexist on a single physical or virtual server. As the user base grows, the system’s capacity to maintain a consistent Quality of Service (QoS) deteriorates.
+The only available scaling strategy in such a setup is *vertical scaling*, that is increasing the resources of a single machine (CPU, RAM, or storage).
+This approach introduces a *single point of failure* and quickly
+becomes economically inefficient due to the *nonlinear* growth of
+hardware costs. 
+This limitation paved the way for *cloud-based architectures*, where *scalability* and *resilience* can be achieved through *distributed resources* rather than hardware upgrades.
+=== Layered architecture
+In modern architectures, applications are organized in layers that separate *stateless components* (e.g., web servers, APIs) from *stateful* ones (e.g., databases, persistent storage).
+
+This separation allows independent scaling strategies:
+- Stateless layers can scale horizontally by replicating instances across multiple machines.
+- Stateful layers require specialized handling to preserve data consistency and durability.
+As user demand grows, the stateless layer typically faces CPU-bound scaling needs, while the persistence layer depends on I/O and storage optimization.
+=== Load balancing
+In horizontally scaled systems, a load balancer acts as the single entry point for all client requests, distributing traffic among multiple application instances. Its goal is to *optimize resource utilization*, *minimize response time*, and *ensure
+high availability*.
+
+Common scheduling algorithms include:
+- *Round Robin* (RR): sequentially forwards each request to the next available node.
+- *Least Used* (	LU): selects the node with the lowest current load.
+Modern cloud load balancers continuously perform *health checks * and cooperate with other cloud services to *dynamically adjust* the number of active instances in response to changing workloads.
+=== Amazon Auto Scaling group
+Usually, *multiple copies of a service run simultaneously* to serve the volume of customer traffic.
+End-users see only one interface for the application, but behind it many identical VMs (EC2 instances) are running, each handling a share of the incoming requests. Managing groups of instances can be cumbersome. 
+EC2 provides *Auto Scaling groups* as a solution. Auto Scaling groups are defined with a minimum and maximum number of identical EC2 instances. Useful for controlling a fleet of EC2 instances that can handle a variable load.
+An auto scaling group is a collection of Amazon EC2 instances that:
+- share the same characteristics (homogeneous virtual machines)
+- are treated as one logical grouping for the purposes of scaling and management
+Auto Scaling groups automatically:
+- scale the number of virtual machine instances (horizontal scaling) or 
+- maintain a fixed number of instances (fail recovery – fleet management)
+
+The EC2 instances can be from the same region or from one or more availability zones.
+==== Launch Configuration
+Every Auto Scaling group is associated with a launch configuration, which describes an instance (VM) of the group (parameters necessary to create the instances).
+Only one launch configuration can be attached to an Auto Scaling group at a time.
+
+New or updated launch configuration can be introduced.
+Future new instances will be created and launched using the new configuration parameters, existing instances are not affected.
+When Auto Scaling needs to scale down, it first terminates instances that have an older launch configuration.
+=== Auto Scaling with AWS
+Auto Scaling is a web service designed to launch or terminate EC2 instances automatically based on:
+1. User-defined policies
+2. Schedules
+3. Health checks
+1 and 2 are useful to respond automatically to changing conditions. It is used to specify how Auto Scaling should
+respond to changes.
+
+It guarantees that the number of EC2 instances running:
+- Increases seamlessly during demand spikes
+- Decreases automatically during demand lulls
+- Stays the same in case of failures
+The services involved in Auto Scaling are:
+- *CloudWatch (CW)*:
+	- Provides monitoring over EC2 (CPU load average, disk I/O rate, and network I/O rate)
+- *Elastic Load Balancer (ELB)*:
+	- Distributes traffic across any number of EC2 instances (in the same Availability Zone or across several zones in a Region)
+	- Performs also periodic health checks on the instances of the group, and will stop sending traffic to unhealthy instances
+	- Health information is then collected by CloudWatch
+- *Auto Scaling*:
+	- Uses the data collected by CW to build systems that can scale out (adding more instances) and scale in
+	- (shutting down instances) over a defined auto scaling group
+	- Usually responds to triggers on CPU/memory utilization and latency, implementing a policy
+#figure(image("../images/6/autoScalingPipeline.png"), caption: "Auto Scaling pipeline")
+Auto Scaling attempts to distribute instances evenly between the Availability Zones that are enabled for an Auto Scaling group.
+- Auto Scaling attempts to launch new instances in the Availability Zone with the fewest instances.
+- If the attempt fails, however, Auto Scaling will attempt to launch in other zones until it succeeds
+Certain operations and conditions can cause an Auto Scaling group to become unbalanced. Rebalancing activities can take place.
+==== Health checks
+A *health check* is a *periodic test* performed to assess the operational status of each instance within an Auto Scaling group.
+It typically involves invoking a predefined endpoint or using a built-in monitoring probe to verify whether the instance responds correctly and within acceptable performance thresholds.
+When an instance fails a health check, due to degraded performance or unresponsiveness, Auto Scaling *automatically terminates it and launches a replacement instance*.
+This mechanism ensures that the group remains consistent, available, and self-healing, without manual intervention.
+==== Triggers in Auto Scaling Systems
+A trigger defines the condition under which an Auto Scaling action is executed.
+It combines two core elements:
+- *CloudWatch Alarm* — continuously monitors a chosen
+  performance metric (e.g., CPU utilization, latency, or network
+  throughput) and detects when it crosses a defined threshold.
+	- An object that watches over a single metric. It can change state depending on the value of the metric
+	- When an alarm changes state one or more actions are triggered
+	- To create an alarm, specify:
+		- The metric to watch
+		- The threshold values for the metric
+		- The number of evaluation periods
+	- An alarm has three possible states:
+		- OK: The metric is within the defined threshold
+		- ALARM: The metric is outside of the defined threshold
+		- INSUFFICIENT_DATA: The metric is not available, or there is not enough data available for the metric to set the alarm state to OK
+	- An action is invoked when an alarm changes state and remains  in that state for several time periods
+- *Auto Scaling Policy* — specifies the corrective action to
+  perform (e.g., launch or terminate instances) when the alarm
+  changes state.
+	- A policy defines the scaling action that an Auto Scaling group performs when a monitoring alarm changes state.
+	- It specifies *how* and by *how much* capacity should change
+	- AWS supports multiple policy types:
+		- *Simple scaling*: single rule and fixed adjustment.
+		- *Step scaling*: multiple thresholds with proportional actions.
+			- adjustment depends on size of alarm breach
+		- *Target tracking scaling*: continuous feedback around a target metric.
+			- target value for a specific metric
+		- *Scheduled scaling*: time-based capacity adjustments
+			- Configure Time based Auto Scaling plan
+			- Specify the date and time of execution, minimum, maximum,and desired instance size of capacity
+When the *alarm threshold* is reached, the corresponding policy
+initiates a *scaling activity*.
+==== Fleet management
+*Fleet management * ensures that the instances in EC2 fleet are performing as designed.
+*ELB* and *CW* monitor the health of each EC2 instance launched. If any instance terminates unexpectedly:
+- The termination is detected
+- A replacement instance is launched
+There are three main functions that Auto Scaling performs to automate fleet management for EC2 instances:
+- Monitoring the health of running instances
+- Automatically replacing unhealthy instances
+- Balancing the traffic across Availability Zones
+==== Cooldown — Stabilizing the Scaling Feedback Loop
+A *cooldown period* is a configurable interval following a
+scaling activity during which Auto Scaling temporarily
+suspends additional scaling actions.
+This period allows the system to stabilize and for monitoring metrics (e.g., CPU utilization, latency) to reflect the impact of the previous capacity adjustment.
+Without a cooldown, consecutive scaling events could occur before the system reaches equilibrium, leading to *oscillations* (thrashing) and unnecessary resource churn.

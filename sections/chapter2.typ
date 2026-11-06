@@ -11,17 +11,20 @@ The capability provided to the consumer (user or application) is to provision:
 - other fundamental computing resources
 The consumer can deploy and run arbitrary software on the virtualized resources, which can include OS and applications.
 The consumer *does not manage or control the underlying cloud infrastructure* but has *control over operating systems, storage, deployed applications*, and possibly limited control of selected networking components.
+
+This kind of technique is enabled by *virtualization*.
+
+#colbreak()
 #figure(
 	image("../images/2/IAAS.png")
 )
 ]
-This kind of technique is enabled by *virtualization*.
 #figure(
 	image("../images/2/RMI.png", width: 80%), caption: "IAAS architecture"
 )
 === Resource Management Interface
 RMI Enables the customer to obtain and manage several types of virtualized resource:
-- *Virtual Machine*: IaaS provides the basic virtual machine operations, such as creation,, suspension, resumption and termination.
+- *Virtual Machine*: IaaS provides the basic virtual machine operations, such as creation, suspension, resumption and termination.
 - *Virtual Storage*: IaaS provides the basic virtual storage operations, such as space allocation, space release, data writing and data reading. 
 - *Virtual Network*: IaaS provides the basic virtual network operations, such as IP address allocation, domain name register, connection establishment and bandwidth provision.
 === System Monitoring Interface
@@ -48,7 +51,7 @@ The *consumer* does not manage or control the underlying cloud infrastructure in
 #colbreak()
 #figure(image("../images/2/PAAS.png",width: 100%))
 ]
-#note[This technique is enabled by *runtime environment*, that is acollection of software services available. Usually implemented by a collection of program libraries and an application execution engine]
+#note[This technique is enabled by *runtime environment*, that is a collection of software services available. Usually implemented by a collection of program libraries and an application execution engine]
 PAAS offers different services:
 - Users make use of *programming IDE* to *develop their service* over PaaS.  		
   -	This IDE should integrate the full functionalities supported from the underling runtime environment. This IDE should also provide development tools, such as profiler, debugger and testing environment. 

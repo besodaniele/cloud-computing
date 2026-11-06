@@ -33,5 +33,11 @@
 = Virtualization
 #include "sections/chapter5.typ"
 #pagebreak()
-= Amazon infrastructure
+= deep dive: IaaS (AWS)
 #include "sections/chapter6.typ"
+#pagebreak()
+= deep dive: PaaS (Azure)
+#include "sections/chapter7.typ"
+#pagebreak()
+= Serverless computing
+#include "sections/chapter8.typ"
