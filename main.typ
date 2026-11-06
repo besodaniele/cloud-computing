@@ -32,3 +32,6 @@
 #pagebreak()
 = Virtualization
 #include "sections/chapter5.typ"
+#pagebreak()
+= Amazon infrastructure
+#include "sections/chapter6.typ"
