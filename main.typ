@@ -41,3 +41,6 @@
 #pagebreak()
 = Serverless computing
 #include "sections/chapter8.typ"
+#pagebreak()
+= Towards a world of services
+#include "sections/chapter9.typ"
